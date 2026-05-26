@@ -16,6 +16,7 @@ import { AdmissionCountdownComponent } from '../components/admission-countdown/a
 import { FeatureFlagService } from '../services/feature-flag.service';
 import { BreadcrumbComponent } from '../shared/breadcrumb/breadcrumb.component';
 import { ViewChild, ElementRef } from '@angular/core';
+import { lastValueFrom } from 'rxjs';
 import * as bootstrap from 'bootstrap';
 
 @Component({
@@ -236,8 +237,10 @@ async onStepCompleted(completed: boolean): Promise<void> {
       // Create booking for the cart item
       const bookingResponse = await this.createBookingForItem(this.cartItem);
       
-      const bookingId = bookingResponse?.bookingId || bookingResponse?.globalId || bookingResponse?.booking?.[0]?.data?.globalId;
-      const sessionId = bookingResponse?.sessionId || bookingResponse?.booking?.[0]?.data?.sessionId;
+      // Extract bookingId and sessionId from the response structure
+      // Response structure: { code, data: { bookingId, sessionId, ... }, msg, error, context }
+      const bookingId = bookingResponse?.data?.bookingId || bookingResponse?.bookingId || bookingResponse?.globalId || bookingResponse?.booking?.[0]?.data?.globalId;
+      const sessionId = bookingResponse?.data?.sessionId || bookingResponse?.sessionId || bookingResponse?.booking?.[0]?.data?.sessionId;
 
       if (bookingId && sessionId) {
         
@@ -246,9 +249,15 @@ async onStepCompleted(completed: boolean): Promise<void> {
         
         console.log('✅ Booking created successfully:', {
           bookingId,
-          sessionId
+          sessionId,
+          fullResponse: bookingResponse
         });
       } else {
+        console.error('❌ Booking creation failed - missing booking data', {
+          bookingId,
+          sessionId,
+          fullResponse: bookingResponse
+        });
         throw new Error('Booking creation failed - no booking data returned');
       }
       
@@ -517,10 +526,33 @@ async onStepCompleted(completed: boolean): Promise<void> {
     }
   }
 
-  confirmCancelBooking(): void {
+  async confirmCancelBooking(): Promise<void> {
     if (this.cancelModalInstance) {
       this.cancelModalInstance.hide();
     }
-    window.location.assign('/');
+
+    try {
+      console.log('🔍 Cancelling booking:', {
+        currentBookingId: this.currentBookingId,
+        cartItem: this.cartItem,
+        bookingIdFromCart: this.cartItem?.bookingId
+      });
+      // Cancel the booking in the database (releases the held pass)
+      if (this.currentBookingId) {
+        await lastValueFrom(this.bookingService.cancelBooking(this.currentBookingId));
+        console.log('✅ Booking cancelled successfully:', this.currentBookingId);
+      }
+
+      // Clear the cart
+      this.cartService.clearCart();
+
+      // Full page reload to home
+      window.location.href = '/';
+    } catch (error) {
+      console.error('❌ Error cancelling booking:', error);
+      // Even if the API call fails, still clear the cart and reload
+      this.cartService.clearCart();
+      window.location.href = '/';
+    }
   }
 }
